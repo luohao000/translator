@@ -1,7 +1,7 @@
 from openai import OpenAI
 
 
-with open("C:\\Users\\luohao\\Desktop\\co\\apikey.txt", "r", encoding="utf-8") as key_file:
+with open("apikey.txt", "r", encoding="utf-8") as key_file:
     api_key = key_file.read().strip()
 client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
