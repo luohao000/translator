@@ -1,5 +1,6 @@
 from openai import OpenAI
 from pathlib import Path
+import re
 
 
 with open("apikey.txt", "r", encoding="utf-8") as key_file:
@@ -8,22 +9,68 @@ client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
 
 def split_text(text, max_length=2000):
-    """将长文本分割成达到指定长度的段落"""
+    """将长文本分割成达到指定长度的段落（保护 Markdown “需要配对”的结构不被切断）"""
+
+    def _is_fence_line(line: str):
+        return re.match(r"^\s*(`{3,}|~{3,})", line)
+
+    def _is_closing_fence(line: str, fence_char: str, fence_len: int) -> bool:
+        # 关闭 fence 通常是纯 fence 字符 + 可选空白
+        return re.match(rf"^\s*{re.escape(fence_char)}{{{fence_len},}}\s*$", line) is not None
+
     texts = []
     current_paragraphs = []
     current_length = 0
 
-    # 按段落分割（简单实现）
+    # 需要“配对”的保护状态（保护常见的 Markdown 结构）
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    in_math_block = False  # $$...$$ 或 \[...\]
+
+    # 按段落分割
     paragraphs = text.split('\n')
     for paragraph in paragraphs:
-        if current_length > max_length:
+        line = paragraph
+        stripped = line.strip()
+
+        # 先写入当前行
+        current_paragraphs.append(line)
+        current_length += len(line)
+
+        # 数学块：只处理常见的“独占一行”的起止标记
+        if stripped in {"$$", r"\\[", r"\\]"}:
+            if stripped == "$$":
+                in_math_block = not in_math_block
+            elif stripped == r"\\[":
+                in_math_block = True
+            elif stripped == r"\\]":
+                in_math_block = False
+
+        # fenced code block：``` 或 ~~~
+        if in_fence:
+            if _is_closing_fence(line, fence_char, fence_len):
+                in_fence = False
+                fence_char = ""
+                fence_len = 0
+        else:
+            m = _is_fence_line(line)
+            if m:
+                fence = m.group(1)
+                fence_char = fence[0]
+                fence_len = len(fence)
+                in_fence = True
+
+        in_protected_region = in_fence or in_math_block
+
+        # 只在“不处于需要配对的区域”时才允许切分
+        if current_length > max_length and not in_protected_region:
             texts.append("\n".join(current_paragraphs))
             current_paragraphs = []
             current_length = 0
-        current_paragraphs.append(paragraph)
-        current_length += len(paragraph)
 
-    texts.append("\n".join(current_paragraphs))
+    if current_paragraphs:
+        texts.append("\n".join(current_paragraphs))
     return texts
 
 
@@ -50,18 +97,22 @@ def main():
         return
 
     # 文件选择逻辑：
-    # - 如果输入是文件：只翻译该文件
-    # - 如果输入是文件夹：递归翻译其中所有 .md/.html/.txt 文件
+    # - 如果输入是文件：仅当后缀为 .md/.txt 才翻译，否则忽略
+    # - 如果输入是文件夹：递归翻译其中所有 .md/.txt 文件，其余类型忽略
+    allowed_suffixes = {".md", ".txt"}
+
     if input_path.is_file():
+        if input_path.suffix.lower() not in allowed_suffixes:
+            print("未找到可翻译的文件，已跳过。")
+            return
         input_files = [input_path]
         output_root = input_path.parent
     else:
-        allowed_suffixes = {".md", ".html", ".txt"}
         input_files = sorted(
             [p for p in input_path.rglob("*") if p.is_file() and p.suffix.lower() in allowed_suffixes]
         )
         if not input_files:
-            print(f"错误：文件夹 {input_path} 中未找到 .md/.html/.txt 文件")
+            print("未找到可翻译的文件，已结束。")
             return
         output_root = input_path.parent
 
