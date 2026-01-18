@@ -1,4 +1,5 @@
 from openai import OpenAI
+from pathlib import Path
 
 
 with open("apikey.txt", "r", encoding="utf-8") as key_file:
@@ -38,30 +39,72 @@ def translate_text(text):
 
 
 def main():
-    INPUT_FILE = input("请输入要翻译的文件名: ")
-    OUTPUT_FILE = INPUT_FILE.rsplit('.', 1)[0] + "_fy." + INPUT_FILE.rsplit('.', 1)[1]
-
-    # 读取原始文件
-    try:
-        with open(INPUT_FILE, 'r', encoding='utf-8') as f:
-            original_text = f.read()
-    except FileNotFoundError:
-        print(f"错误：文件 {INPUT_FILE} 未找到")
+    input_path_str = input("请输入要翻译的文件或文件夹名: ").strip().strip('"')
+    if not input_path_str:
+        print("错误：输入为空")
         return
 
-    # 分割文本
-    texts = split_text(original_text)
+    input_path = Path(input_path_str)
+    if not input_path.exists():
+        print(f"错误：路径 {input_path} 不存在")
+        return
 
-    # 逐段翻译
-    translated_text = []
-    for i, text in enumerate(texts, 1):
-        print(f"正在翻译第 {i}/{len(texts)} 部分...")
-        translated_text.append(translate_text(text))
+    # 文件选择逻辑：
+    # - 如果输入是文件：只翻译该文件
+    # - 如果输入是文件夹：递归翻译其中所有 .md/.html/.txt 文件
+    if input_path.is_file():
+        input_files = [input_path]
+        output_root = input_path.parent
+    else:
+        allowed_suffixes = {".md", ".html", ".txt"}
+        input_files = sorted(
+            [p for p in input_path.rglob("*") if p.is_file() and p.suffix.lower() in allowed_suffixes]
+        )
+        if not input_files:
+            print(f"错误：文件夹 {input_path} 中未找到 .md/.html/.txt 文件")
+            return
+        output_root = input_path.parent
 
-    # 保存结果
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-        f.write("\n\n".join(translated_text))
-    print(f"翻译完成，结果已保存到 {OUTPUT_FILE}")
+    # 输出目录/文件命名：保持原目录结构，根目录加 _fy 后缀
+    # 例：handbook-v2/xxx.md -> handbook-v2_fy/xxx.md
+    if input_path.is_dir():
+        output_base_dir = output_root / f"{input_path.name}_fy"
+    else:
+        output_base_dir = None
+
+    total_files = len(input_files)
+    for file_index, input_file in enumerate(input_files, 1):
+        if input_path.is_file():
+            output_file = input_file.with_name(f"{input_file.stem}_fy{input_file.suffix}")
+        else:
+            rel_path = input_file.relative_to(input_path)
+            output_file = output_base_dir / rel_path
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        print(f"\n[{file_index}/{total_files}] 正在翻译文件: {input_file}")
+
+        # 读取原始文件
+        try:
+            original_text = input_file.read_text(encoding='utf-8')
+        except FileNotFoundError:
+            print(f"错误：文件 {input_file} 未找到，跳过")
+            continue
+
+        # 分割文本
+        texts = split_text(original_text)
+
+        # 逐段翻译
+        translated_text = []
+        for i, text in enumerate(texts, 1):
+            print(f"  正在翻译第 {i}/{len(texts)} 部分...")
+            translated_text.append(translate_text(text))
+
+        # 保存结果
+        output_file.write_text("\n\n".join(translated_text), encoding='utf-8')
+        print(f"  已保存: {output_file}")
+
+    if input_path.is_dir():
+        print(f"\n全部翻译完成，结果已保存到文件夹: {output_base_dir}")
 
 
 if __name__ == "__main__":
