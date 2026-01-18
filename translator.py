@@ -78,7 +78,7 @@ def translate_text(text):
     response = client.chat.completions.create(
         model="deepseek-chat",
         messages=[
-            {"role": "user", "content": f"请将以下英文内容翻译成中文（如果你收到的内容以中文为主，则将其翻译为英文），保持格式不变: \n{text}"},
+            {"role": "user", "content": f"请将以下内容翻译成中文（如果你收到的内容以中文为主，则将其翻译为英文），保持格式不变（如果内容为空就输出空行）: \n{text}"},
         ],
         temperature=1.3
     )
